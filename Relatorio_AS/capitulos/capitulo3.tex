@@ -1,8 +1,321 @@
-\chapter{Título do Capítulo}
+\chapter{Automa\c{c}\~ao DNS e Web}
 \label{cap3}
 
-Mais umas citações \cite{AndroidDoc, Chen1976}
+\section{Enquadramento do cap\'{\i}tulo}
 
-%a linha seguinte deve ser substituída pelo texto do capítulo
-\lipsum
+Este cap\'{\i}tulo apresenta a implementa\c{c}\~ao dos pontos do enunciado associados \`a administra\c{c}\~ao de DNS e de servi\c{c}os Web, com foco na automatiza\c{c}\~ao de tarefas operacionais que, quando feitas manualmente, s\~ao mais demoradas e propensas a erro.
 
+Do ponto de vista funcional, o DNS (\textit{Domain Name System}) garante a resolu\c{c}\~ao de nomes para endere\c{c}os IP. Isso permite que os servi\c{c}os sejam acedidos por dom\'{\i}nios leg\'{\i}veis em vez de endere\c{c}os num\'ericos. J\'a o servi\c{c}o Web, neste caso com Apache (\texttt{httpd}), responde aos pedidos HTTP e entrega o conte\'udo definido para cada dom\'{\i}nio atrav\'es de \textit{VirtualHosts}.
+
+No contexto do projeto, estas duas camadas est\~ao diretamente ligadas: primeiro o DNS aponta o dom\'{\i}nio para o servidor, depois o Apache seleciona o \textit{VirtualHost} correto para servir a p\'agina esperada. Por isso, a integra\c{c}\~ao DNS+Web \'{e} tratada aqui de forma conjunta, com valida\c{c}\~ao em ambiente cliente-servidor.
+
+\section{Quest\~ao 1: cria\c{c}\~ao autom\'atica de zona master DNS}
+\label{sec:q1}
+
+\subsection{Objetivo}
+
+Na Quest\~ao 1, pretende-se automatizar a cria\c{c}\~ao de uma zona \textit{master} no servidor DNS, a partir da introdu\c{c}\~ao, por parte do utilizador, do nome do dom\'{\i}nio e do endere\c{c}o IP do servidor. O objetivo principal consiste em eliminar a necessidade de configura\c{c}\~ao manual no BIND, assegurando que a nova zona \'{e} criada de forma autom\'atica e que inclui, pelo menos, os registos do tipo \texttt{A} necess\'arios para a resolu\c{c}\~ao do dom\'{\i}nio para o IP do servidor DNS/Web.
+
+Esta automatiza\c{c}\~ao permite reduzir erros de configura\c{c}\~ao, tornar o processo mais r\'apido e garantir uma estrutura uniforme na cria\c{c}\~ao de novas zonas DNS.
+
+\subsection{Prepara\c{c}\~ao do servi\c{c}o DNS}
+
+Antes da execu\c{c}\~ao do script, foi necess\'ario preparar a m\'aquina servidor com os pacotes e servi\c{c}os base do BIND, de forma a disponibilizar o ambiente necess\'ario \`a cria\c{c}\~ao e valida\c{c}\~ao das zonas DNS.
+
+\begin{lstlisting}[language=bash,caption={Preparacao inicial do servico DNS}]
+yum install bind bind-utils -y
+systemctl enable named
+systemctl start named
+systemctl status named
+\end{lstlisting}
+
+Foram instalados os pacotes \texttt{bind} e \texttt{bind-utils}, essenciais para o servi\c{c}o DNS e para a valida\c{c}\~ao de configura\c{c}\~oes. Em seguida, o servi\c{c}o \texttt{named} foi ativado e iniciado, garantindo que o servidor estava operacional antes da execu\c{c}\~ao do script.
+
+Ap\'os a instala\c{c}\~ao e ativa\c{c}\~ao do servi\c{c}o, foi criada a diretoria de trabalho do projeto, onde foram armazenados os scripts desenvolvidos ao longo da implementa\c{c}\~ao.
+
+\begin{lstlisting}[language=bash,caption={Criacao da diretoria de trabalho}]
+mkdir -p /root/projeto
+cd /root/projeto
+\end{lstlisting}
+
+A cria\c{c}\~ao desta diretoria permitiu centralizar os scripts do projeto num local \'unico, facilitando execu\c{c}\~ao, manuten\c{c}\~ao e testes.
+
+\subsection{Implementa\c{c}\~ao do script}
+
+O script \texttt{q1\_dns.sh} automatiza a cria\c{c}\~ao da zona \textit{master} DNS a partir do dom\'{\i}nio e do IP introduzidos pelo utilizador. O fluxo foi organizado em blocos: defini\c{c}\~oes iniciais, valida\c{c}\~oes, integra\c{c}\~ao no BIND, cria\c{c}\~ao da zona e valida\c{c}\~ao final.
+
+\begin{lstlisting}[language=bash,caption={Definicoes base e validacoes iniciais}]
+MAINCONF="/etc/named.conf"
+CONFZONES="/etc/named/zones.conf"
+ZONEDIR="/var/named"
+
+read -p "Introduza o nome do dominio: " DOMINIO
+read -p "Introduza o IP do servidor DNS/Web: " IP
+
+if [ "$EUID" -ne 0 ]; then
+    echo "Erro: execute como root."
+    exit 1
+fi
+\end{lstlisting}
+
+Este bloco define a base da solu\c{c}\~ao e valida a execu\c{c}\~ao como \texttt{root}, condi\c{c}\~ao necess\'aria para alterar ficheiros de sistema.
+
+De seguida, s\~ao feitas valida\c{c}\~oes para garantir que dom\'{\i}nio, IP, pacotes e caminhos necess\'arios est\~ao dispon\'{\i}veis.
+
+\begin{lstlisting}[language=bash,caption={Validacao de pre-condicoes de execucao}]
+if [ -z "$DOMINIO" ] || [ -z "$IP" ]; then
+    echo "Erro: dominio e IP sao obrigatorios."
+    exit 1
+fi
+
+if ! command -v named-checkconf >/dev/null 2>&1; then
+    echo "Erro: BIND/DNS nao esta instalado."
+    echo "Execute: yum install bind bind-utils -y"
+    exit 1
+fi
+
+if [ ! -f "$MAINCONF" ]; then
+    echo "Erro: ficheiro $MAINCONF nao existe."
+    exit 1
+fi
+
+if [ ! -d "$ZONEDIR" ]; then
+    echo "Erro: diretoria $ZONEDIR nao existe."
+    exit 1
+fi
+\end{lstlisting}
+
+Estas verifica\c{c}\~oes evitam configura\c{c}\~oes incompletas e paragens por erro em ambiente n\~ao preparado.
+
+Numa segunda fase, o script integra a nova zona no BIND atrav\'es do ficheiro \texttt{/etc/named/zones.conf}, evitando altera\c{c}\~oes repetidas no \texttt{named.conf}.
+
+\begin{lstlisting}[language=bash,caption={Integracao da zona e prevencao de duplicados}]
+touch "$CONFZONES"
+
+if ! grep -q 'include "/etc/named/zones.conf";' "$MAINCONF"; then
+    echo '' >> "$MAINCONF"
+    echo 'include "/etc/named/zones.conf";' >> "$MAINCONF"
+fi
+
+if grep -q "zone \"$DOMINIO\"" "$CONFZONES"; then
+    echo "Erro: a zona $DOMINIO ja existe em $CONFZONES"
+    exit 1
+fi
+
+if [ -f "$ZONEFILE" ]; then
+    echo "Erro: o ficheiro $ZONEFILE ja existe."
+    exit 1
+fi
+\end{lstlisting}
+
+Este bloco impede duplica\c{c}\~oes e torna o processo de cria\c{c}\~ao de zonas mais robusto.
+
+Numa terceira fase, o script cria o ficheiro de zona com os registos m\'{\i}nimos (\texttt{SOA}, \texttt{NS} e \texttt{A}).
+
+\begin{lstlisting}[language=bash,caption={Criacao do ficheiro de zona}]
+cat > "$ZONEFILE" <<EOF
+\$TTL 86400
+@   IN  SOA ns1.$DOMINIO. root.$DOMINIO. (
+        $SERIAL ; serial
+        3600    ; refresh
+        1800    ; retry
+        604800  ; expire
+        86400 ) ; minimum
+
+@       IN  NS  ns1.$DOMINIO.
+@       IN  A   $IP
+ns1     IN  A   $IP
+www     IN  A   $IP
+EOF
+\end{lstlisting}
+
+Este \'e o n\'ucleo funcional do script, pois garante a gera\c{c}\~ao din\^amica da zona e o cumprimento do requisito de resolu\c{c}\~ao do dom\'{\i}nio para o IP indicado.
+
+Ap\'os a cria\c{c}\~ao do ficheiro de zona, o script aplica permiss\~oes adequadas e regista formalmente a nova zona no ficheiro \texttt{zones.conf}.
+
+\begin{lstlisting}[language=bash,caption={Permissoes e registo formal da nova zona}]
+chown root:named "$ZONEFILE"
+chmod 640 "$ZONEFILE"
+
+cat >> "$CONFZONES" <<EOF
+
+zone "$DOMINIO" IN {
+    type master;
+    file "$DOMINIO.zone";
+    allow-update { none; };
+};
+EOF
+\end{lstlisting}
+
+A atribui\c{c}\~ao de permiss\~oes garante leitura correta pelo \texttt{named} e a entrada em \texttt{zones.conf} torna a zona ativa no BIND.
+
+Por fim, o script valida toda a configura\c{c}\~ao antes de reiniciar o servi\c{c}o DNS.
+
+\begin{lstlisting}[language=bash,caption={Validacao e ativacao da configuracao}]
+named-checkconf || { echo "Erro no ficheiro $MAINCONF"; exit 1; }
+named-checkzone "$DOMINIO" "$ZONEFILE" || { echo "Erro no ficheiro de zona"; exit 1; }
+systemctl restart named
+systemctl enable named
+\end{lstlisting}
+
+Este bloco confirma a validade da configura\c{c}\~ao antes de reiniciar o servi\c{c}o, reduzindo o risco de deixar o DNS em estado inconsistente.
+
+\subsection{Execu\c{c}\~ao e demonstra\c{c}\~ao}
+
+Ap\'os atribuir permiss\~ao de execu\c{c}\~ao ao script (\texttt{chmod +x /root/projeto/q1\_dns.sh}), a execu\c{c}\~ao foi conclu\'{\i}da com sucesso para o dom\'{\i}nio \texttt{teste.com}. A valida\c{c}\~ao confirmou a cria\c{c}\~ao do ficheiro de zona, o registo da zona em \texttt{/etc/named/zones.conf} e a resolu\c{c}\~ao correta no cliente.
+
+\subsection{Evid\^encias visuais da Quest\~ao 1}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q1_execucao}
+\caption{Execucao do script da Questao 1 e validacao da zona criada}
+\label{fig:q1-execucao}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q1_zonefile}
+\caption{Conteudo do ficheiro de zona gerado automaticamente}
+\label{fig:q1-zonefile}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q1_zonesconf}
+\caption{Definicao da zona adicionada em \texttt{/etc/named/zones.conf}}
+\label{fig:q1-zonesconf}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{q1_nslookup_windows}
+\caption{Validacao da resolucao DNS no cliente Windows}
+\label{fig:q1-nslookup}
+\end{figure}
+
+\clearpage
+\section{Quest\~ao 3: integra\c{c}\~ao DNS e VirtualHost Web}
+\label{sec:q3}
+
+\subsection{Objetivo}
+
+A Quest\~ao 3 constitui uma extens\~ao direta da Quest\~ao 1. Para al\'em da cria\c{c}\~ao autom\'atica da zona DNS, o script passa tamb\'em a configurar automaticamente o servi\c{c}o Web, de forma a permitir que o dom\'{\i}nio criado responda por HTTP atrav\'es de um \textit{VirtualHost} dedicado no Apache.
+
+Em termos pr\'aticos, a solu\c{c}\~ao implementada passa a abranger todo o ciclo de publica\c{c}\~ao de um dom\'{\i}nio, incluindo:
+
+\begin{enumerate}
+    \item cria\c{c}\~ao da zona DNS e do respetivo ficheiro de zona;
+    \item cria\c{c}\~ao da diretoria Web associada ao dom\'{\i}nio;
+    \item gera\c{c}\~ao autom\'atica do ficheiro de \textit{VirtualHost} no Apache;
+    \item cria\c{c}\~ao de uma p\'agina inicial de boas-vindas;
+    \item valida\c{c}\~ao e rein\'{\i}cio dos servi\c{c}os \texttt{named} e \texttt{httpd}.
+\end{enumerate}
+
+Com esta abordagem, o dom\'{\i}nio fica funcional de ponta a ponta: resolve em DNS e responde por HTTP com um \textit{VirtualHost} dedicado.
+
+\subsection{Implementa\c{c}\~ao do script \texttt{q3\_dns\_web.sh}}
+
+Numa primeira fase, o script define os caminhos principais utilizados tanto pelo BIND como pelo Apache.
+
+\begin{lstlisting}[language=bash,caption={Variaveis principais para DNS e Apache}]
+MAINCONF="/etc/named.conf"
+CONFZONES="/etc/named/zones.conf"
+ZONEDIR="/var/named"
+
+HTTPD_CONF_DIR="/etc/httpd/conf.d"
+WEBROOT_BASE="/var/www"
+\end{lstlisting}
+
+Estas vari\'aveis organizam a configura\c{c}\~ao de DNS e Web e tornam o script mais leg\'{\i}vel. Depois da recolha do dom\'{\i}nio e do IP, o script valida o ambiente, garante a inclus\~ao \'unica de \texttt{zones.conf} e impede duplica\c{c}\~oes de zona, ficheiro de zona e \textit{VirtualHost}.
+
+Ap\'os estas valida\c{c}\~oes, o script cria a zona DNS e avan\c{c}a para a componente Web, gerando a diretoria do dom\'{\i}nio e a p\'agina inicial.
+
+\begin{lstlisting}[language=bash,caption={Criacao automatica de WebRoot e pagina inicial}]
+WEBROOT="$WEBROOT_BASE/${DOMINIO}"
+mkdir -p "$WEBROOT"
+
+cat > "$WEBROOT/index.html" <<EOF
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <title>Bem-vindo a $DOMINIO</title>
+</head>
+<body>
+    <h1>Bem-vindo ao dominio $DOMINIO</h1>
+    <p>Este VirtualHost foi criado automaticamente.</p>
+</body>
+</html>
+EOF
+\end{lstlisting}
+
+Este bloco prepara o conte\'udo Web m\'{\i}nimo do dom\'{\i}nio, permitindo validar imediatamente o funcionamento do \textit{VirtualHost}.
+
+Depois de preparar a estrutura de conte\'udos, o script cria o ficheiro de \textit{VirtualHost} no Apache.
+
+\begin{lstlisting}[language=bash,caption={Configuracao do VirtualHost no Apache}]
+cat > "$VHOSTFILE" <<EOF
+<VirtualHost *:80>
+    ServerName $DOMINIO
+    ServerAlias www.$DOMINIO
+    DocumentRoot "$WEBROOT"
+
+    <Directory "$WEBROOT">
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog /var/log/httpd/${DOMINIO}_error.log
+    CustomLog /var/log/httpd/${DOMINIO}_access.log combined
+</VirtualHost>
+EOF
+\end{lstlisting}
+
+Este bloco integra o dom\'{\i}nio no Apache: \texttt{ServerName}/\texttt{ServerAlias} definem os nomes atendidos, \texttt{DocumentRoot} define o conte\'udo e os logs ficam separados por dom\'{\i}nio.
+
+Por fim, o script valida as configura\c{c}\~oes dos dois servi\c{c}os antes de proceder \`a sua ativa\c{c}\~ao definitiva.
+
+\begin{lstlisting}[language=bash,caption={Validacao final e reinicio dos servicos}]
+named-checkconf || { echo "Erro no named.conf"; exit 1; }
+named-checkzone "$DOMINIO" "$ZONEFILE" || { echo "Erro na zona DNS"; exit 1; }
+httpd -t || { echo "Erro na configuracao Apache"; exit 1; }
+
+systemctl restart named
+systemctl restart httpd
+\end{lstlisting}
+
+Este bloco final valida DNS e Apache antes do rein\'{\i}cio dos servi\c{c}os, garantindo aplica\c{c}\~ao segura da configura\c{c}\~ao.
+
+\subsection{Valida\c{c}\~ao funcional}
+
+A valida\c{c}\~ao da Quest\~ao 3 foi feita em tr\^es n\'{\i}veis para confirmar o funcionamento das componentes DNS e Web.
+
+\begin{enumerate}
+    \item \textbf{Execu\c{c}\~ao do script no servidor}: confirma cria\c{c}\~ao do ficheiro de zona DNS, da entrada correspondente em \texttt{zones.conf}, do ficheiro de \textit{VirtualHost} no Apache, da diretoria Web do dom\'{\i}nio e da p\'agina inicial \texttt{index.html};
+    \item \textbf{Resolu\c{c}\~ao DNS no cliente}: confirma que o dom\'{\i}nio configurado \'{e} corretamente resolvido para o endere\c{c}o IP do servidor;
+    \item \textbf{Acesso HTTP no navegador}: confirma que o Apache entrega corretamente a p\'agina de boas-vindas criada automaticamente pelo script.
+\end{enumerate}
+
+\subsection{Evid\^encias visuais da Quest\~ao 3}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q3_execucao}
+\caption{Execucao da Questao 3 no servidor}
+\label{fig:q3-execucao}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{q3_nslookup_windows}
+\caption{Validacao de resolucao DNS no cliente Windows}
+\label{fig:q3-nslookup}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q3_http_browser}
+\caption{Acesso HTTP ao VirtualHost criado automaticamente}
+\label{fig:q3-http}
+\end{figure}
