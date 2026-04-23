@@ -1,102 +1,18 @@
-\chapter{Este é o título deste capítulo}
+\chapter{Arquitetura e ambiente de testes}
 \label{cap2}
-Este capítulo exemplifica a utilização de referências, figuras, tabelas e listagens.
 
-\section{Titulo de uma secção}
-\label{sec}
-Este é primeiro parágrafo desta secção.
+Este capítulo descreve o ambiente laboratorial utilizado para o desenvolvimento e validação do projeto, incluindo a infraestrutura virtualizada, a organização cliente-servidor, a stack técnica adotada e os principais critérios de teste. O objetivo deste ambiente foi garantir condições controladas para instalar, configurar e verificar de forma automatizada os serviços de Administração de Sistemas previstos no enunciado.
 
-Uma equação $x = \frac{-b + \sqrt{b^2 - 4ac}}{2a}$.
+O laboratório foi implementado em Oracle VM VirtualBox, sobre um computador anfitrião com sistema operativo Windows, que também foi utilizado como plataforma complementar de teste em algumas etapas. A opção por virtualização permitiu repetir configurações, isolar o contexto de execução e reduzir riscos sobre o sistema anfitrião, mantendo simultaneamente flexibilidade para reconfiguração durante o desenvolvimento.
 
-E mais outra em linha própria:
-$$e^{i\pi} + 1 = 0$$
+Foram utilizadas duas máquinas virtuais principais, ambas com AlmaLinux 8. A máquina \textit{AS\_Server} foi configurada como servidor central do projeto, com disco principal de 20 GB e três discos adicionais de 5 GB destinados à implementação de RAID 5. A máquina \textit{AS\_Client}, também com AlmaLinux 8, e disco de 20 GB, foi utilizada para testar os serviços disponibilizados pelo servidor. Em ambos os casos foi selecionado no VirtualBox o tipo Linux e o subtipo Red Hat (64-bit)
 
-\subsection{Título de uma subsecção}
-\subsubsection{Título de parágrafo de texto normal}
+A conetividade entre as máquinas foi definida em modo \textit{Bridged Adapter}, esta escolha permitiu que as máquinas virtuais se comportassem como nós autónomos na rede local, com comunicação direta entre cliente e servidor e acesso à Internet para instalação de pacotes e dependências. Importa salientar que o endereçamento IP não foi fixo e variaram consoante a rede onde o laboratório era executado.
 
-%https://tug.ctan.org/info/biblatex-cheatsheet/biblatex-cheatsheet.pdf
-%https://www.overleaf.com/learn/latex/Articles/Getting_started_with_BibLaTeX
-Eis duas citações: como alegou \textcite{book:Brooks1995}, adicionar mais pessoas a um projeto de software atrasado só o torna ainda mais atrasado.
-Os modelos conceptuais de dados que têm por objetivo unificar diferentes visões dos dados são muito importantes \parencite{Chen1976}. E mais exemplos de citações \parencite{AndroidDoc},
-\parencite[p. 120]{book:Brooks1995},
-\parencite{Chen1976}
-A Figura \ref{fig:exemplofig} apresenta os vários tipos de diagrama da Unified Modeling Language (UML). É uma figura "flutuante"\ o que significa que a sua localização será decidida pelo \LaTeX.
+Após a instalação base do sistema operativo nas duas VMs, foram aplicadas configurações iniciais de preparação do ambiente: atualização do sistema, instalação de pacotes essenciais, ajuste de hostname, preparação de acesso remoto por SSH e criação da diretoria de trabalho para os scripts (\texttt{/root/projeto}). Para acelerar a fase inicial de validação laboratorial e reduzir interferências externas, foram também adotadas medidas de simplificação temporária, nomeadamente desativação de SELinux e da \textit{firewalld}.
 
-\begin{figure}[!htb]
-\centering
-\caption{Exemplo de Figura flutuante (\textit{in} \url{http://en.wikipedia.org/wiki/Class_diagram})}
-\includegraphics[width=13cm]{exemploFig}
-\label{fig:exemplofig}
-\end{figure}
+Do ponto de vista de implementação, o projeto foi desenvolvido  em Bash, por oferecer integração direta com ferramentas nativas de administração Linux e boa adequação à automatização de tarefas sequenciais. A stack técnica incluiu os serviços e utilitários necessários para cobrir os requisitos do enunciado: BIND/named para DNS, Apache httpd para serviço Web e VirtualHosts, Samba para partilhas com clientes Windows, NFS para partilhas com clientes Linux/Unix, \texttt{tar} e \texttt{rsync} para backups, \texttt{mdadm} para RAID 5, Fail2Ban para mitigação de ataques de força bruta a SSH. 
 
-
-Se pretender que a figura fique no local em que está (sem ser um objeto flutuante) então pode fazer como na figura seguinte (Fig. \ref{fig:exemplofigFixa}).
-
-\begin{center}
-
-\captionof{figure}{Exemplo de Figura não flutuante (\textit{in} \url{http://en.wikipedia.org/wiki/Class_diagram})}
-\includegraphics[width=\textwidth]{exemploFig}
-%\includegraphics[width=0.5\textwidth]{exemploFig}
-\label{fig:exemplofigFixa}
-\end{center}
-
-
-%Exemplo de listagem de código Java.
-%\lstlisting{
-
-\section{Exemplos de Listagens}
-
-
-A Listagem \ref{lst:javaparcial} apresenta apenas o método \lstinline[language=java]$void Quicksort(int A[], int f, int l)$, apresentado por  \textcite{Quicksort1962}. Para tal, são indicadas a linha inicial e a linha final a importar do ficheiro.
-
-
-\lstinputlisting[language=java,abovecaptionskip=20pt,caption={Exemplo de listagem de parte de um ficheiro Java na pasta listagens.},{label=lst:javaparcial},firstline=38,lastline=44]{listagens/quicksort.java}
-
-
-%\pagebreak % para forçar uma mudança de página
-%%%%%%%%%%%%%%%%%%%%
-\section{Um exemplo de tabela}
-
-A Tabela \ref{tab:casoFIXO} apresenta os resultados de aplicação de quatro métodos a um caso.
-Não é suportado (ainda) uma distinção entre "Quadro"\ e "Tabela"\ dado que essa distinção não parece estar formalizada em Portugal (ver, por exemplo, a resposta no \href{https://ciberduvidas.iscte-iul.pt/consultorio/perguntas/tabela-vs-quadro-e-figura-vs-ilustracao/32273}{ciberdúvidas}).
-
-\noindent\begin{minipage}{\linewidth}
-\captionof{table}{Uma tabela de exemplo não flutuante} % título da tabela
-\begin{tabular}{l l c r} % duas colunas à esquerda (l l), uma ao centro (c) e uma à direita (r) (4 colunas)
-\hline\hline %insere duas linhas horizontais
-Caso & Método 1 & Método 2 & Método 3 \\ [0.5ex] % insere tabela 
-\hline % insere uma linha horizontal
-1 & 50 & 837 & 970 \\ % insure corpo da tabela
-2 & 47 & 877 & 230 \\
-3 & 31 & 25 & 415 \\
-4 & 35 & 144 & 2356 \\
-5 & 45 & 300 & 556 \\ [1ex] % [1ex] adiciona espaço vertical
-\hline %insere uma linha horizontal
-\end{tabular}
-\label{tab:casoFIXO} % é utilizada para referir a tabela no texto
-\\ %% linha em braco
-\textit{Nota}: uma nota. remover se não for necessária.\\
-\end{minipage}
-
-Ou, a Tabela \ref{tab:caso}, em versão flutuante :
-
-%baseado num exemplo em http://www1.maths.leeds.ac.uk/latex/TableHelp1.pdf
-\begin{table}[!htb]
-\caption{Uma tabela de exemplo} 
-\begin{tabular}{l l c r} % duas colunas à esquerda (l l), uma ao centro (c) e uma à direita (r) (4 colunas)
-\hline\hline %insere duas linhas horizontais
-Caso & Método 1 & Método 2 & Método 3 \\ [0.5ex] % insere tabela 
-\hline % insere uma linha horizontal
-1 & 50 & 837 & 970 \\ % insere corpo da tabela
-2 & 47 & 877 & 230 \\
-3 & 31 & 25 & 415 \\
-4 & 35 & 144 & 2356 \\
-5 & 45 & 300 & 556 \\ [1ex] % [1ex] adiciona espaço vertical
-\hline %insere uma linha horizontal
-\end{tabular}
-\label{tab:caso} % é utilizada para referir a tabela no texto
-\\ %% linha em braco
-\textit{Nota}: uma nota. remover se não for necessária.\\
-\end{table}
+Em síntese, a arquitetura adotada privilegiou simplicidade, repetibilidade e alinhamento com os requisitos do projeto. Embora o ambiente tenha sido desenhado para fins laboratoriais e académicos, com algumas simplificações controladas de segurança em fases iniciais, a sua estrutura permitiu suportar com eficácia o desenvolvimento dos scripts, a demonstração dos serviços e a produção de evidências técnicas para o relatório final.
 
 
