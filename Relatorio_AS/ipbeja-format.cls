@@ -82,7 +82,7 @@ author: João Paulo Barros (joao.barros@ipbeja.pt)
 \RequirePackage{titletoc}
 
 % --- Language-dependent settings (including babel loading) ---
-\DeclareRobustCommand{\pt-en}[2]{%
+\DeclareRobustCommand{\pten}[2]{%
   \ifx\SelectedLang\LangOptPT
     #1%
   \else
@@ -177,7 +177,7 @@ author: João Paulo Barros (joao.barros@ipbeja.pt)
   \renewcommand{\thetable}{\arabic{table}}%
 }
 
-\defbibheading{bibliography}[\pt-en{\bibstring{references}}{\bibstring{references}}]{%
+\defbibheading{bibliography}[\pten{\bibstring{references}}{\bibstring{references}}]{%
   \clearpage
   \phantomsection
   \addcontentsline{toc}{chapter}{\protect\textsc{#1}}%
@@ -302,7 +302,7 @@ author: João Paulo Barros (joao.barros@ipbeja.pt)
 }
 
 \DeclareRobustCommand{\anexos}{%
-  \pt-en{%
+  \pten{%
       \renewcommand{\appendixpagename}{Anexos}%
       \renewcommand{\appendixname}{Anexo}%
       \renewcommand{\appendixtocname}{Anexos}%
