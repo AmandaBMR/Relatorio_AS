@@ -1,0 +1,438 @@
+\setcounter{chapter}{5}
+\chapter{Backup e armazenamento}
+\label{cap5}
+
+\section{Enquadramento do cap\'{\i}tulo}
+
+Este cap\'{\i}tulo apresenta a implementa\c{c}\~ao dos pontos do enunciado relacionados com mecanismos de \textit{backup} e com a organiza\c{c}\~ao segura do armazenamento no servidor Linux. Em continuidade com a abordagem seguida nos cap\'{\i}tulos anteriores, o objetivo consistiu em automatizar tarefas administrativas relevantes, reduzindo interven\c{c}\~ao manual e tornando o processo mais consistente, repet\'{\i}vel e menos sujeito a erro.
+
+No \^ambito da administra\c{c}\~ao de sistemas, a exist\^encia de c\'opias de seguran\c{c}a atualizadas \'{e} essencial para garantir recupera\c{c}\~ao de informa\c{c}\~ao em caso de falha, erro humano ou corrup\c{c}\~ao de dados. Da mesma forma, a utiliza\c{c}\~ao de mecanismos de redund\^ancia no armazenamento permite aumentar a disponibilidade da informa\c{c}\~ao e mitigar o impacto da falha de discos. Por essa raz\~ao, o trabalho contemplou duas vertentes complementares: a cria\c{c}\~ao autom\'atica de \textit{backups} com \texttt{tar} e \texttt{rsync}, e a implementa\c{c}\~ao de um volume RAID 5 com \texttt{mdadm}.
+
+\section{Ponto 9: backups de ficheiros cr\'{\i}ticos e diretorias de utilizadores}
+\label{sec:p9}
+
+\subsection{Objetivo}
+
+O Ponto 9 do enunciado pretende assegurar a prote\c{c}\~ao de ficheiros e configura\c{c}\~oes cruciais ao sistema. Nesta primeira parte, a solu\c{c}\~ao implementada recorre ao utilit\'ario \texttt{tar} para criar uma c\'opia comprimida dos principais ficheiros associados \`a gest\~ao de utilizadores e grupos no sistema Linux.
+
+O objetivo principal consiste em preservar informa\c{c}\~ao essencial para a administra\c{c}\~ao local do servidor, nomeadamente os ficheiros de contas, grupos e configura\c{c}\~oes relacionadas com a cria\c{c}\~ao de utilizadores. Deste modo, em caso de erro, corrup\c{c}\~ao ou altera\c{c}\~ao indevida, torna-se poss\'{\i}vel recuperar rapidamente esses elementos a partir da c\'opia criada.
+
+\subsection{Implementa\c{c}\~ao do script}
+
+Para esta primeira parte da Quest\~ao 9, a prepara\c{c}\~ao do ambiente iniciou-se com a instala\c{c}\~ao do utilit\'ario \texttt{tar} e com a cria\c{c}\~ao do ficheiro de script na diretoria de trabalho do projeto.
+
+\begin{lstlisting}[language=bash,caption={Preparacao inicial da Questao 9}]
+yum install tar -y
+vi /root/projeto/q9_backup_config.sh
+\end{lstlisting}
+
+Ap\'os esta prepara\c{c}\~ao inicial, foi desenvolvido o script \texttt{q9\_backup\_config.sh}, organizado em blocos simples e coerentes: defini\c{c}\~oes iniciais, valida\c{c}\~ao de permiss\~oes, cria\c{c}\~ao da diretoria de destino, execu\c{c}\~ao do \textit{backup} e valida\c{c}\~ao do resultado.
+
+Numa primeira fase, o script define a diretoria de destino, gera uma marca temporal com data e hora e constr\'oi automaticamente o nome do ficheiro final de \textit{backup}.
+
+\begin{lstlisting}[language=bash,caption={Definicoes iniciais do script}]
+#!/bin/bash
+
+DESTINO="/backups/config"
+DATA=$(date +%Y%m%d_%H%M%S)
+ARQUIVO="$DESTINO/config_sistema_$DATA.tar.gz"
+\end{lstlisting}
+
+Este bloco permite organizar os \textit{backups} numa diretoria dedicada e manter um hist\'orico de execu\c{c}\~oes atrav\'es da inclus\~ao da data no nome do ficheiro.
+
+Numa segunda fase, o script valida se est\'a a ser executado com privil\'egios de \texttt{root}, condi\c{c}\~ao necess\'aria para ler ficheiros sens\'{\i}veis do sistema, como \texttt{/etc/shadow}.
+
+\begin{lstlisting}[language=bash,caption={Validacao de privilegios de execucao}]
+if [ "$EUID" -ne 0 ]; then
+    echo "Erro: execute como root."
+    exit 1
+fi
+\end{lstlisting}
+
+Esta valida\c{c}\~ao impede falhas por permiss\~oes insuficientes e evita a cria\c{c}\~ao de c\'opias incompletas.
+
+Numa terceira fase, o script garante a exist\^encia da diretoria onde os ficheiros comprimidos ser\~ao armazenados.
+
+\begin{lstlisting}[language=bash,caption={Criacao da diretoria de destino}]
+mkdir -p "$DESTINO"
+\end{lstlisting}
+
+O uso de \texttt{mkdir -p} torna a execu\c{c}\~ao mais robusta, permitindo repetir o processo sem erro caso a diretoria j\'a exista.
+
+Depois de preparada a estrutura necess\'aria, o script executa o \textit{backup} propriamente dito com \texttt{tar}, incluindo os principais ficheiros de contas, grupos e defini\c{c}\~oes de cria\c{c}\~ao de utilizadores do sistema.
+
+\begin{lstlisting}[language=bash,caption={Backup de ficheiros criticos com tar}]
+tar -czpf "$ARQUIVO" \
+    /etc/passwd \
+    /etc/shadow \
+    /etc/group \
+    /etc/gshadow \
+    /etc/login.defs \
+    /etc/default/useradd
+\end{lstlisting}
+
+Neste comando, a op\c{c}\~ao \texttt{-c} cria o arquivo, a op\c{c}\~ao \texttt{-z} ativa a compress\~ao, a op\c{c}\~ao \texttt{-p} preserva permiss\~oes e a op\c{c}\~ao \texttt{-f} permite indicar o nome final do ficheiro. O resultado \'{e} um \textit{backup} comprimido com os principais elementos de configura\c{c}\~ao associados \`a gest\~ao local de utilizadores.
+
+Por fim, o script valida se a opera\c{c}\~ao foi conclu\'{\i}da com sucesso, apresentando uma mensagem adequada ao administrador.
+
+\begin{lstlisting}[language=bash,caption={Validacao do resultado do backup}]
+if [ $? -eq 0 ]; then
+    echo "Backup criado com sucesso: $ARQUIVO"
+else
+    echo "Erro ao criar backup."
+    exit 1
+fi
+\end{lstlisting}
+
+Esta valida\c{c}\~ao final permite perceber imediatamente se o ficheiro foi criado corretamente e torna a execu\c{c}\~ao mais clara do ponto de vista operacional.
+
+\subsection{Valida\c{c}\~ao funcional}
+
+Ap\'os atribuir permiss\~ao de execu\c{c}\~ao ao script com \texttt{chmod +x /root/projeto/q9\_backup\_config.sh}, a valida\c{c}\~ao funcional pode ser feita atrav\'es da sua execu\c{c}\~ao e da confirma\c{c}\~ao da cria\c{c}\~ao do ficheiro comprimido na diretoria \texttt{/backups/config}. A verifica\c{c}\~ao pode ser apoiada por comandos simples de inspe\c{c}\~ao.
+
+\begin{lstlisting}[language=bash,caption={Comandos de validacao funcional do ponto 9}]
+chmod +x /root/projeto/q9_backup_config.sh
+/root/projeto/q9_backup_config.sh
+ls -lh /backups/config
+\end{lstlisting}
+
+Com esta valida\c{c}\~ao, confirma-se que o sistema passa a dispor de um mecanismo autom\'atico para:
+
+\begin{enumerate}
+    \item gerar c\'opias comprimidas dos ficheiros de contas e grupos do sistema;
+    \item preservar tamb\'em ficheiros relevantes de defini\c{c}\~ao de utilizadores, como \texttt{/etc/login.defs} e \texttt{/etc/default/useradd};
+    \item manter hist\'orico de execu\c{c}\~oes atrav\'es da marca temporal no nome do arquivo;
+    \item simplificar processos de recupera\c{c}\~ao em caso de perda ou corrup\c{c}\~ao das configura\c{c}\~oes.
+\end{enumerate}
+
+\subsection{Evid\^encias visuais}
+
+As evid\^encias visuais desta primeira parte da Quest\~ao 9 demonstram a execu\c{c}\~ao do script \texttt{q9\_backup\_config.sh}, a mensagem de sucesso apresentada no terminal e a cria\c{c}\~ao do ficheiro \texttt{.tar.gz} na diretoria \texttt{/backups/config}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q9_backupfeito}
+\caption{Execucao do script da Questao 9 e criacao do ficheiro de backup}
+\label{fig:q9-backupfeito}
+\end{figure}
+
+\subsection{Objetivo}
+
+Numa segunda parte do Ponto 9, o objetivo passou a consistir na implementa\c{c}\~ao de um mecanismo de \textit{backup incremental forever} para as \'{a}reas dos utilizadores do sistema, recorrendo ao utilit\'ario \texttt{rsync}. Ao contr\'ario de uma c\'opia integral repetida em cada execu\c{c}\~ao, esta abordagem permite manter diferentes \textit{snapshots} temporais, reutilizando ficheiros inalterados atrav\'es de \textit{links} e reduzindo o espa\c{c}o ocupado em disco.
+
+Esta solu\c{c}\~ao permite preservar o conte\'udo de \texttt{/home} de forma mais eficiente, mantendo hist\'orico de execu\c{c}\~oes e simplificando eventuais processos de recupera\c{c}\~ao de ficheiros dos utilizadores.
+
+\subsection{Implementa\c{c}\~ao do script}
+
+Para esta segunda parte, a prepara\c{c}\~ao do ambiente iniciou-se com a instala\c{c}\~ao do utilit\'ario \texttt{rsync} e com a cria\c{c}\~ao de um novo script na diretoria de trabalho do projeto.
+
+\begin{lstlisting}[language=bash,caption={Preparacao inicial da segunda parte da Questao 9}]
+yum install rsync -y
+vi /root/projeto/q9_backup_home_rsync.sh
+\end{lstlisting}
+
+Ap\'os esta prepara\c{c}\~ao, foi desenvolvido o script \texttt{q9\_backup\_home\_rsync.sh}, organizado em blocos que permitem definir os caminhos principais, validar permiss\~oes, preparar a estrutura de destino, executar o \textit{backup} com ou sem refer\^encia ao anterior e registar o resultado em ficheiro de \textit{log}.
+
+Numa primeira fase, o script define a origem do \textit{backup}, a diretoria base onde ser\~ao guardados os \textit{snapshots}, a marca temporal da execu\c{c}\~ao, o nome do destino corrente, o apontador simb\'olico para o \'{u}ltimo \textit{backup} e o ficheiro de \textit{log}.
+
+\begin{lstlisting}[language=bash,caption={Definicoes iniciais do script rsync}]
+#!/bin/bash
+
+ORIGEM="/home/"
+BASE="/backups/home"
+DATA=$(date +%Y%m%d_%H%M%S)
+DESTINO="$BASE/$DATA"
+ULTIMO_LINK="$BASE/ultimo"
+LOG="/var/log/backup_home_rsync.log"
+\end{lstlisting}
+
+Este bloco organiza toda a estrutura da solu\c{c}\~ao, permitindo que cada execu\c{c}\~ao produza um novo \textit{snapshot} identificado no tempo e que o script saiba qual foi o \'{u}ltimo \textit{backup} realizado.
+
+De seguida, o script valida se a execu\c{c}\~ao est\'a a ser feita com privil\'egios de \texttt{root}, condi\c{c}\~ao importante para garantir acesso completo aos ficheiros das diretorias dos utilizadores.
+
+\begin{lstlisting}[language=bash,caption={Validacao de privilegios na execucao do rsync}]
+if [ "$EUID" -ne 0 ]; then
+    echo "Erro: execute como root."
+    exit 1
+fi
+\end{lstlisting}
+
+Depois desta verifica\c{c}\~ao, o script prepara a estrutura de diret\'orias necess\'aria para receber o novo \textit{backup}.
+
+\begin{lstlisting}[language=bash,caption={Criacao da estrutura base do backup}]
+mkdir -p "$BASE"
+mkdir -p "$DESTINO"
+\end{lstlisting}
+
+Esta abordagem garante que tanto a diretoria principal como a nova diretoria temporal existem antes da execu\c{c}\~ao do \texttt{rsync}.
+
+Numa fase seguinte, o script verifica se j\'a existe um \textit{backup} anterior identificado pelo \textit{link} simb\'olico \texttt{ultimo}. Se existir, o novo \textit{backup} \'{e} executado em modo incremental com \texttt{--link-dest}; caso contr\'ario, \'{e} feita uma primeira sincroniza\c{c}\~ao completa.
+
+\begin{lstlisting}[language=bash,caption={Execucao do backup com rsync}]
+if [ -L "$ULTIMO_LINK" ]; then
+    ANTERIOR=$(readlink -f "$ULTIMO_LINK")
+    rsync -aHAX --delete \
+        --link-dest="$ANTERIOR" \
+        "$ORIGEM" "$DESTINO" >> "$LOG" 2>&1
+else
+    rsync -aHAX --delete \
+        "$ORIGEM" "$DESTINO" >> "$LOG" 2>&1
+fi
+\end{lstlisting}
+
+Neste comando, a op\c{c}\~ao \texttt{-a} preserva atributos gerais, \texttt{-H} mant\'em \textit{hard links}, \texttt{-A} preserva ACLs, \texttt{-X} preserva atributos estendidos e \texttt{--delete} remove do destino ficheiros que j\'a n\~ao existam na origem. A op\c{c}\~ao \texttt{--link-dest} permite que ficheiros inalterados sejam reutilizados a partir do \textit{backup} anterior, concretizando a l\'ogica de \textit{incremental forever}.
+
+Ap\'os a execu\c{c}\~ao do \texttt{rsync}, o script valida se ocorreu algum erro e, em caso afirmativo, encaminha o administrador para o ficheiro de \textit{log}.
+
+\begin{lstlisting}[language=bash,caption={Validacao do resultado do rsync}]
+if [ $? -ne 0 ]; then
+    echo "Erro no backup rsync. Verifique $LOG"
+    exit 1
+fi
+\end{lstlisting}
+
+Esta valida\c{c}\~ao evita que o processo continue em caso de falha e facilita a an\'alise do erro atrav\'es do registo guardado em \texttt{/var/log/backup\_home\_rsync.log}.
+
+Por fim, o script atualiza o \textit{link} simb\'olico para o \'{u}ltimo \textit{backup} realizado e regista a conclus\~ao da opera\c{c}\~ao no ficheiro de \textit{log}, apresentando tamb\'em uma mensagem de sucesso no terminal.
+
+\begin{lstlisting}[language=bash,caption={Atualizacao do ultimo backup e registo final}]
+rm -f "$ULTIMO_LINK"
+ln -s "$DESTINO" "$ULTIMO_LINK"
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - Backup incremental concluido em $DESTINO" >> "$LOG"
+echo "Backup concluido com sucesso: $DESTINO"
+\end{lstlisting}
+
+Este bloco final torna a solu\c{c}\~ao cumulativa entre execu\c{c}\~oes e permite identificar facilmente qual foi o \textit{snapshot} mais recente.
+
+\subsection{Valida\c{c}\~ao funcional}
+
+A valida\c{c}\~ao funcional desta segunda parte foi realizada em dois momentos. Numa primeira execu\c{c}\~ao, foi confirmado que o script criava corretamente a estrutura inicial de \textit{backup} em \texttt{/backups/home}. Numa segunda execu\c{c}\~ao, depois de criar ou alterar um ficheiro em \texttt{/home}, foi verificado que o script gerava um novo \textit{snapshot}, mantendo a l\'ogica incremental.
+
+\begin{lstlisting}[language=bash,caption={Comandos de validacao funcional da segunda parte da Questao 9}]
+chmod +x /root/projeto/q9_backup_home_rsync.sh
+/root/projeto/q9_backup_home_rsync.sh
+ls -l /backups/home
+
+echo "teste1" > /home/teste_backup.txt
+/root/projeto/q9_backup_home_rsync.sh
+ls -l /backups/home
+\end{lstlisting}
+
+Com esta valida\c{c}\~ao, confirma-se que o sistema passa a dispor de um mecanismo autom\'atico para:
+
+\begin{enumerate}
+    \item criar \textit{snapshots} temporais das \'{a}reas dos utilizadores;
+    \item reutilizar ficheiros inalterados a partir do \textit{backup} anterior;
+    \item manter um apontador direto para o \'{u}ltimo \textit{backup} realizado;
+    \item registar todas as opera\c{c}\~oes relevantes num ficheiro de \textit{log}.
+\end{enumerate}
+
+\subsection{Evid\^encias visuais}
+
+As evid\^encias visuais desta segunda parte da Quest\~ao 9 demonstram a primeira execu\c{c}\~ao do script \texttt{q9\_backup\_home\_rsync.sh} e a cria\c{c}\~ao da estrutura inicial de \textit{backup}, bem como uma segunda execu\c{c}\~ao ap\'os a cria\c{c}\~ao de um ficheiro de teste em \texttt{/home}, confirmando a gera\c{c}\~ao de um novo \textit{snapshot}.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q9_rsync}
+\caption{Primeira execucao do script rsync e criacao da estrutura inicial de backup}
+\label{fig:q9-rsync}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q9:backup_arquivo}
+\caption{Nova execucao do script apos alteracao em \texttt{/home} e criacao de novo snapshot}
+\label{fig:q9-backup-arquivo}
+\end{figure}
+
+\section{Ponto 10: cria\c{c}\~ao autom\'atica de RAID 5}
+\label{sec:p10}
+
+\subsection{Objetivo}
+
+O Ponto 10 do enunciado tem como finalidade aumentar a seguran\c{c}a no armazenamento da informa\c{c}\~ao atrav\'es da cria\c{c}\~ao de um RAID n\'{\i}vel 5. Este n\'{\i}vel de RAID distribui dados e paridade por m\'ultiplos discos, permitindo tolerar a falha de um dos discos sem perda imediata de informa\c{c}\~ao. No contexto do projeto, esta solu\c{c}\~ao foi implementada de forma autom\'atica, solicitando ao utilizador o nome da diretoria onde o novo volume dever\'a ser montado.
+
+Conforme indicado no enunciado, antes da execu\c{c}\~ao do procedimento foi necess\'ario adicionar previamente, no VirtualBox, os discos adicionais com o mesmo tamanho, neste caso 5 GB cada, para possibilitar a cria\c{c}\~ao do RAID 5.
+
+\subsection{Implementa\c{c}\~ao do script}
+
+Para automatizar o processo, a prepara\c{c}\~ao iniciou-se com a instala\c{c}\~ao do utilit\'ario \texttt{mdadm} e com a cria\c{c}\~ao do ficheiro de script na diretoria de trabalho do projeto.
+
+\begin{lstlisting}[language=bash,caption={Preparacao inicial da Questao 10}]
+yum install mdadm -y
+vi /root/projeto/q10_raid5.sh
+\end{lstlisting}
+
+Ap\'os esta prepara\c{c}\~ao, foi desenvolvido o script \texttt{q10\_raid5.sh}, organizado em fun\c{c}\~oes que permitem validar permiss\~oes, confirmar a instala\c{c}\~ao do \texttt{mdadm}, listar os discos dispon\'{\i}veis e criar o volume RAID 5 com montagem autom\'atica.
+
+Numa primeira fase, o script define algumas vari\'aveis base da solu\c{c}\~ao, nomeadamente o dispositivo RAID a criar, o nome do array e o sistema de ficheiros a utilizar.
+
+\begin{lstlisting}[language=bash,caption={Definicoes base do script RAID 5}]
+#!/bin/bash
+
+MDDEVICE="/dev/md0"
+RAIDNAME="md0"
+FILESYSTEM="ext4"
+\end{lstlisting}
+
+Estas defini\c{c}\~oes tornam o script mais claro e facilitam a reutiliza\c{c}\~ao dos mesmos valores ao longo do processo.
+
+De seguida, foram criadas fun\c{c}\~oes de valida\c{c}\~ao para garantir a execu\c{c}\~ao com privil\'egios de \texttt{root} e para confirmar que o utilit\'ario \texttt{mdadm} se encontra instalado no sistema.
+
+\begin{lstlisting}[language=bash,caption={Validacoes iniciais do script}]
+verifica_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Erro: execute como root."
+        exit 1
+    fi
+}
+
+verifica_mdadm() {
+    if ! command -v mdadm >/dev/null 2>&1; then
+        echo "Erro: mdadm nao instalado."
+        echo "Execute: yum install mdadm -y"
+        exit 1
+    fi
+}
+\end{lstlisting}
+
+Estas valida\c{c}\~oes evitam erros logo no in\'{\i}cio da execu\c{c}\~ao e asseguram que o ambiente est\'a preparado para a cria\c{c}\~ao do array RAID.
+
+Numa fase seguinte, o script apresenta ao utilizador a lista dos discos dispon\'{\i}veis no sistema, refor\c{c}ando a necessidade de selecionar tr\^es discos de 5 GB para o RAID 5.
+
+\begin{lstlisting}[language=bash,caption={Listagem dos discos disponiveis}]
+listar_discos() {
+    echo
+    echo "Discos disponiveis:"
+    lsblk -d -o NAME,SIZE,TYPE
+    echo
+    echo "Indique 3 discos de 5GB para o RAID 5."
+    echo "Exemplo: /dev/sdb /dev/sdc /dev/sdd"
+    echo
+}
+\end{lstlisting}
+
+Este bloco permite ao utilizador confirmar visualmente os discos presentes antes de introduzir os dispositivos a utilizar.
+
+Depois desta apresenta\c{c}\~ao, a fun\c{c}\~ao principal recolhe os tr\^es discos a utilizar e a diretoria onde o volume dever\'a ser montado. Em seguida, valida se todos os par\^ametros foram introduzidos corretamente e se o dispositivo RAID ainda n\~ao existe.
+
+\begin{lstlisting}[language=bash,caption={Leitura dos discos e da diretoria de montagem}]
+criar_raid() {
+    read -p "Introduza os 3 discos: " D1 D2 D3
+    read -p "Introduza a diretoria de montagem: " MOUNTPOINT
+
+    if [ -z "$D1" ] || [ -z "$D2" ] || [ -z "$D3" ] || [ -z "$MOUNTPOINT" ]; then
+        echo "Erro: discos e diretoria de montagem sao obrigatorios."
+        exit 1
+    fi
+
+    if [ -e "$MDDEVICE" ]; then
+        echo "Erro: $MDDEVICE ja existe."
+        exit 1
+    fi
+\end{lstlisting}
+
+Estas verifica\c{c}\~oes impedem execu\c{c}\~oes incompletas e reduzem o risco de conflito com um array j\'a existente no sistema.
+
+\begin{lstlisting}[language=bash,caption={Validacao dos discos indicados}]
+    for d in "$D1" "$D2" "$D3"; do
+        if [ ! -b "$d" ]; then
+            echo "Erro: dispositivo $d nao existe."
+            exit 1
+        fi
+    done
+\end{lstlisting}
+
+Numa terceira fase, o script valida individualmente cada disco introduzido, confirmando que corresponde a um dispositivo de bloco existente.
+
+\begin{lstlisting}[language=bash,caption={Criacao do array RAID 5 com mdadm}]
+    mdadm --create "$MDDEVICE" --level=5 --raid-devices=3 "$D1" "$D2" "$D3" --verbose
+    if [ $? -ne 0 ]; then
+        echo "Erro na criacao do RAID."
+        exit 1
+    fi
+
+    sleep 3
+\end{lstlisting}
+
+Ap\'os esta valida\c{c}\~ao, o script cria o array RAID 5 com o comando \texttt{mdadm}. A pequena pausa introduzida com \texttt{sleep 3} permite dar tempo ao sistema para disponibilizar corretamente o dispositivo antes da formata\c{c}\~ao.
+
+\begin{lstlisting}[language=bash,caption={Formatacao e montagem do volume RAID}]
+    mkfs.$FILESYSTEM "$MDDEVICE"
+    if [ $? -ne 0 ]; then
+        echo "Erro ao formatar $MDDEVICE"
+        exit 1
+    fi
+
+    mkdir -p "$MOUNTPOINT"
+    mount "$MDDEVICE" "$MOUNTPOINT"
+    if [ $? -ne 0 ]; then
+        echo "Erro ao montar $MDDEVICE em $MOUNTPOINT"
+        exit 1
+    fi
+\end{lstlisting}
+
+Depois da cria\c{c}\~ao do array, o script formata o volume, cria a diretoria de montagem e monta o novo sistema de ficheiros no local indicado pelo utilizador.
+
+\begin{lstlisting}[language=bash,caption={Persistencia da configuracao do RAID}]
+    mkdir -p /etc/mdadm
+    mdadm --detail --scan >> /etc/mdadm.conf 2>/dev/null || mdadm --detail --scan >> /etc/mdadm/mdadm.conf 2>/dev/null
+
+    UUID=$(blkid -s UUID -o value "$MDDEVICE")
+    echo "UUID=$UUID $MOUNTPOINT $FILESYSTEM defaults,nofail 0 0" >> /etc/fstab
+
+    echo
+    echo "RAID 5 criado com sucesso."
+    echo "Dispositivo: $MDDEVICE"
+    echo "Montado em: $MOUNTPOINT"
+}
+\end{lstlisting}
+
+Numa fase final, o script guarda a configura\c{c}\~ao do RAID, obt\'em o UUID do dispositivo criado e adiciona a entrada correspondente em \texttt{/etc/fstab}, garantindo montagem autom\'atica em rein\'{\i}cios futuros.
+
+\begin{lstlisting}[language=bash,caption={Execucao final das funcoes do script}]
+verifica_root
+verifica_mdadm
+listar_discos
+criar_raid
+\end{lstlisting}
+
+\subsection{Valida\c{c}\~ao funcional}
+
+Antes da execu\c{c}\~ao do script, foi necess\'ario preparar o ambiente no VirtualBox atrav\'es da adi\c{c}\~ao dos discos que seriam usados na cria\c{c}\~ao do RAID 5. O procedimento seguido consistiu em desligar a m\'aquina virtual, abrir as defini\c{c}\~oes de armazenamento, adicionar tr\^es novos discos virtuais no controlador SATA, definir 5 GB para cada disco e voltar a ligar a m\'aquina virtual.
+
+Depois desta prepara\c{c}\~ao, a utiliza\c{c}\~ao do script foi iniciada com a atribui\c{c}\~ao de permiss\~oes de execu\c{c}\~ao.
+
+\begin{lstlisting}[language=bash,caption={Comandos de validacao do RAID 5}]
+chmod +x /root/projeto/q10_raid5.sh
+/root/projeto/q10_raid5.sh
+mdadm --detail /dev/md0
+\end{lstlisting}
+
+Neste caso, o comando \texttt{mdadm --detail /dev/md0} foi utilizado como principal forma de teste, permitindo confirmar o estado do array, os discos que o comp\~oem e a consist\^encia da estrutura RAID criada.
+
+\subsection{Evid\^encias visuais}
+
+As evid\^encias visuais desta quest\~ao demonstram a execu\c{c}\~ao do script \texttt{q10\_raid5.sh}, os passos principais do processo de cria\c{c}\~ao do RAID 5 e a valida\c{c}\~ao final atrav\'es do detalhe do array.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q10_script1}
+\caption{Primeira fase de execucao do script da Questao 10}
+\label{fig:q10-script1}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q10_script2}
+\caption{Fase seguinte da execucao do script e criacao do RAID 5}
+\label{fig:q10-script2}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q10_mdam_detail}
+\caption{Validacao do array RAID 5 com \texttt{mdadm --detail /dev/md0}}
+\label{fig:q10-mdadm-detail}
+\end{figure}

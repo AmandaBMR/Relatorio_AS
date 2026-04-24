@@ -1,0 +1,317 @@
+\setcounter{chapter}{6}
+\chapter{Seguran\c{c}a de acesso}
+\label{cap7}
+
+\section{Enquadramento do cap\'{\i}tulo}
+
+Este cap\'{\i}tulo apresenta os pontos do projeto relacionados com mecanismos de seguran\c{c}a de acesso a servi\c{c}os e com o controlo de dom\'{\i}nios atrav\'es do servidor DNS. Em continuidade com a abordagem adotada nos cap\'{\i}tulos anteriores, o foco manteve-se na automatiza\c{c}\~ao das tarefas administrativas, procurando reduzir interven\c{c}\~ao manual, refor\c{c}ar a seguran\c{c}a do sistema e simplificar opera\c{c}\~oes de gest\~ao.
+
+Nesta fase do trabalho, foram considerados os pontos do enunciado relacionados com a prote\c{c}\~ao do servi\c{c}o SSH contra tentativas de acesso indevido e com a cria\c{c}\~ao de uma lista negra de dom\'{\i}nios no servidor DNS. O ponto interm\'edio relativo a \textit{port knocking} ser\'a posteriormente integrado entre estas duas quest\~oes, mantendo a organiza\c{c}\~ao l\'ogica do cap\'{\i}tulo.
+
+\section{Ponto 11: prote\c{c}\~ao do servi\c{c}o SSH com Fail2Ban}
+\label{sec:p11}
+
+\subsection{Objetivo}
+
+O Ponto 11 do enunciado tem como objetivo configurar o servi\c{c}o \texttt{fail2ban} para reduzir o risco de ataques de \textit{brute force} ao servi\c{c}o SSH do Linux. Para isso, a solu\c{c}\~ao deve automatizar a instala\c{c}\~ao dos pacotes e depend\^encias necess\'arios, a configura\c{c}\~ao do servi\c{c}o e a disponibiliza\c{c}\~ao de opera\c{c}\~oes de gest\~ao, nomeadamente a visualiza\c{c}\~ao dos IPs bloqueados e o desbloqueio de um IP indicado pelo utilizador.
+
+No contexto da administra\c{c}\~ao de sistemas, esta medida permite acrescentar uma camada adicional de prote\c{c}\~ao ao acesso remoto, dificultando tentativas repetidas de autentica\c{c}\~ao mal sucedidas e contribuindo para refor\c{c}ar a seguran\c{c}a global do servidor.
+
+\subsection{Implementa\c{c}\~ao do script}
+
+Para automatizar o processo, a prepara\c{c}\~ao inicial iniciou-se com a instala\c{c}\~ao do reposit\'orio EPEL, dos pacotes necess\'arios ao \texttt{fail2ban} e com a ativa\c{c}\~ao dos servi\c{c}os \texttt{firewalld} e \texttt{fail2ban}. Em seguida, foi criado o ficheiro de script na diretoria de trabalho do projeto.
+
+\begin{lstlisting}[language=bash,caption={Preparacao inicial da Questao 11}]
+dnf install -y epel-release
+dnf install -y fail2ban fail2ban-firewalld fail2ban-selinux
+systemctl enable --now firewalld
+systemctl enable --now fail2ban
+
+vi /root/projeto/q11_fail2ban.sh
+\end{lstlisting}
+
+Ap\'os esta prepara\c{c}\~ao, foi desenvolvido o script \texttt{q11\_fail2ban.sh}, organizado em fun\c{c}\~oes que permitem validar permiss\~oes, instalar os componentes necess\'arios, configurar a prote\c{c}\~ao do servi\c{c}o SSH, consultar o estado do \textit{jail}, listar IPs bloqueados, desbloquear um IP espec\'{\i}fico, reiniciar o servi\c{c}o e consultar o respetivo \textit{log}.
+
+Numa primeira fase, o script define o caminho do ficheiro \texttt{jail.local}, que ser\'a utilizado para guardar a configura\c{c}\~ao do \texttt{fail2ban}.
+
+\begin{lstlisting}[language=bash,caption={Definicao inicial do ficheiro de configuracao}]
+#!/bin/bash
+
+JAILLOCAL="/etc/fail2ban/jail.local"
+\end{lstlisting}
+
+Esta vari\'avel centraliza o caminho do ficheiro de configura\c{c}\~ao principal, facilitando a sua reutiliza\c{c}\~ao ao longo do script.
+
+De seguida, o script valida se a execu\c{c}\~ao est\'a a ser feita com privil\'egios de \texttt{root}, condi\c{c}\~ao necess\'aria para instalar pacotes, escrever ficheiros em \texttt{/etc} e controlar servi\c{c}os do sistema.
+
+\begin{lstlisting}[language=bash,caption={Validacao de privilegios de execucao}]
+verifica_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Erro: execute como root."
+        exit 1
+    fi
+}
+\end{lstlisting}
+
+Esta valida\c{c}\~ao impede falhas por permiss\~oes insuficientes e evita configura\c{c}\~oes incompletas do servi\c{c}o.
+
+Numa segunda fase, o script disponibiliza uma fun\c{c}\~ao dedicada \`a instala\c{c}\~ao do \texttt{fail2ban} e das depend\^encias necess\'arias.
+
+\begin{lstlisting}[language=bash,caption={Instalacao automatica do Fail2Ban}]
+instalar_fail2ban() {
+    echo "A instalar EPEL e Fail2Ban..."
+
+    dnf install -y epel-release
+    dnf install -y fail2ban fail2ban-firewalld fail2ban-selinux
+
+    if [ $? -ne 0 ]; then
+        echo "Erro na instalacao do Fail2Ban."
+        exit 1
+    fi
+
+    systemctl enable fail2ban --now
+    echo "Fail2Ban instalado com sucesso."
+}
+\end{lstlisting}
+
+Este bloco automatiza toda a instala\c{c}\~ao inicial do servi\c{c}o, incluindo a ativa\c{c}\~ao imediata do \texttt{fail2ban}.
+
+Depois da instala\c{c}\~ao, o script trata da configura\c{c}\~ao espec\'{\i}fica da prote\c{c}\~ao SSH atrav\'es da cria\c{c}\~ao do ficheiro \texttt{jail.local}.
+
+\begin{lstlisting}[language=bash,caption={Configuracao automatica da protecao SSH}]
+configurar_fail2ban_ssh() {
+    echo "A configurar proteção SSH..."
+
+    mkdir -p /etc/fail2ban
+
+cat > "$JAILLOCAL" <<EOF
+[DEFAULT]
+bantime = 1h
+findtime = 10m
+maxretry = 3
+banaction = firewallcmd-rich-rules
+ignoreip = 127.0.0.1/8 ::1
+
+[sshd]
+enabled = true
+port = ssh
+backend = systemd
+EOF
+
+    systemctl enable fail2ban --now
+    systemctl restart fail2ban
+
+    if [ $? -ne 0 ]; then
+        echo "Erro ao iniciar/reiniciar o Fail2Ban."
+        exit 1
+    fi
+
+    echo "Configuracao aplicada com sucesso."
+}
+\end{lstlisting}
+
+Nesta configura\c{c}\~ao, o tempo de bloqueio foi definido para uma hora, a janela de dete\c{c}\~ao para dez minutos e o n\'umero m\'aximo de tentativas falhadas para tr\^es. O \textit{jail} \texttt{sshd} foi ativado com integra\c{c}\~ao no \texttt{systemd}, ficando orientado para a prote\c{c}\~ao do acesso SSH.
+
+Numa terceira fase, o script disponibiliza fun\c{c}\~oes de consulta do estado do \textit{jail} SSH e da lista de endere\c{c}os IP bloqueados.
+
+\begin{lstlisting}[language=bash,caption={Consulta do estado do jail e dos IPs bloqueados}]
+ver_estado_ssh() {
+    fail2ban-client status sshd
+}
+
+listar_ips_bloqueados() {
+    echo "IPs bloqueados no jail sshd:"
+    fail2ban-client status sshd | sed -n '/Banned IP list:/p'
+}
+\end{lstlisting}
+
+Estas fun\c{c}\~oes permitem ao administrador verificar rapidamente se o \textit{jail} se encontra ativo e quais os IPs atualmente bloqueados pelo servi\c{c}o.
+
+Para responder ao requisito de desbloqueio de um IP indicado pelo utilizador, foi criada uma fun\c{c}\~ao espec\'{\i}fica de \textit{unban}.
+
+\begin{lstlisting}[language=bash,caption={Desbloqueio de um IP indicado pelo utilizador}]
+desbloquear_ip() {
+    read -p "Introduza o IP a desbloquear: " IP
+
+    if [ -z "$IP" ]; then
+        echo "Erro: IP obrigatorio."
+        return
+    fi
+
+    fail2ban-client set sshd unbanip "$IP"
+    if [ $? -eq 0 ]; then
+        echo "IP $IP desbloqueado com sucesso."
+    else
+        echo "Erro ao desbloquear IP $IP."
+    fi
+}
+\end{lstlisting}
+
+Esta fun\c{c}\~ao concretiza uma das exig\^encias principais do enunciado, permitindo gerir diretamente um endere\c{c}o bloqueado sem edi\c{c}\~ao manual de configura\c{c}\~oes.
+
+O script inclui ainda fun\c{c}\~oes auxiliares para reiniciar o servi\c{c}o e consultar o ficheiro de \textit{log}, tornando a opera\c{c}\~ao e a manuten\c{c}\~ao mais simples.
+
+\begin{lstlisting}[language=bash,caption={Reinicio do servico e consulta do log}]
+reiniciar_fail2ban() {
+    systemctl restart fail2ban
+    systemctl status fail2ban --no-pager
+}
+
+ver_log() {
+    if [ -f /var/log/fail2ban.log ]; then
+        tail -n 30 /var/log/fail2ban.log
+    else
+        journalctl -u fail2ban --no-pager -n 30
+    fi
+}
+\end{lstlisting}
+
+Estas fun\c{c}\~oes permitem confirmar o estado do servi\c{c}o e analisar os eventos mais recentes registados pelo \texttt{fail2ban}.
+
+Por fim, o script organiza estas opera\c{c}\~oes num menu interativo, facilitando a utiliza\c{c}\~ao do sistema pelo administrador.
+
+\begin{lstlisting}[language=bash,caption={Menu principal do script}]
+menu() {
+    echo
+    echo "===== MENU FAIL2BAN ====="
+    echo "1 - Instalar packages e dependencias"
+    echo "2 - Configurar Fail2Ban para SSH"
+    echo "3 - Ver estado do jail sshd"
+    echo "4 - Listar IPs bloqueados"
+    echo "5 - Desbloquear IP"
+    echo "6 - Reiniciar servico"
+    echo "7 - Ver log"
+    echo "0 - Sair"
+    echo
+    read -p "Opcao: " OP
+
+    case $OP in
+        1) instalar_fail2ban ;;
+        2) configurar_fail2ban_ssh ;;
+        3) ver_estado_ssh ;;
+        4) listar_ips_bloqueados ;;
+        5) desbloquear_ip ;;
+        6) reiniciar_fail2ban ;;
+        7) ver_log ;;
+        0) exit 0 ;;
+        *) echo "Opcao invalida." ;;
+    esac
+}
+\end{lstlisting}
+
+O menu organiza as funcionalidades exigidas pelo enunciado numa interface simples, orientada para opera\c{c}\~oes de instala\c{c}\~ao, consulta e gest\~ao do servi\c{c}o.
+
+\begin{lstlisting}[language=bash,caption={Arranque do script em ciclo interativo}]
+verifica_root
+
+while true; do
+    menu
+done
+\end{lstlisting}
+
+Este bloco final garante que o script valida primeiro as permiss\~oes de execu\c{c}\~ao e permanece ativo em ciclo, permitindo ao utilizador aceder repetidamente \`as diferentes op\c{c}\~oes do menu.
+
+\subsection{Valida\c{c}\~ao funcional}
+
+Depois de guardar o script, a valida\c{c}\~ao funcional iniciou-se com a atribui\c{c}\~ao de permiss\~ao de execu\c{c}\~ao e com a abertura do menu interativo do \texttt{fail2ban}.
+
+\begin{lstlisting}[language=bash,caption={Arranque do script da Questao 11}]
+chmod +x /root/projeto/q11_fail2ban.sh
+/root/projeto/q11_fail2ban.sh
+\end{lstlisting}
+
+A sequ\^encia de utiliza\c{c}\~ao seguida foi organizada da forma seguinte:
+
+\begin{enumerate}
+    \item op\c{c}\~ao 1, para instalar os pacotes e depend\^encias;
+    \item op\c{c}\~ao 2, para aplicar a configura\c{c}\~ao de prote\c{c}\~ao ao servi\c{c}o SSH;
+    \item op\c{c}\~ao 3, para verificar o estado do \textit{jail} \texttt{sshd}.
+\end{enumerate}
+
+Ap\'os esta configura\c{c}\~ao inicial, os testes prosseguiram a partir da m\'aquina cliente Linux. Numa primeira fase, foi confirmada a comunica\c{c}\~ao entre cliente e servidor atrav\'es de um teste de conectividade com \texttt{ping}. De seguida, foram efetuadas tentativas de autentica\c{c}\~ao SSH com credenciais incorretas, com o objetivo de provocar o bloqueio autom\'atico por parte do \texttt{fail2ban}.
+
+Depois de provocado o bloqueio, a valida\c{c}\~ao prosseguiu no servidor atrav\'es das restantes op\c{c}\~oes do menu. Para testar a op\c{c}\~ao 4, o script foi novamente executado e foi escolhida a op\c{c}\~ao \texttt{Listar IPs bloqueados}, confirmando a apresenta\c{c}\~ao do IP da m\'aquina cliente na lista do \textit{jail} \texttt{sshd}.
+
+Numa fase seguinte, foi testada a op\c{c}\~ao 5, correspondente ao desbloqueio de um IP. Para isso, foi introduzido o endere\c{c}o IP da m\'aquina cliente e, depois da opera\c{c}\~ao, foi utilizada a verifica\c{c}\~ao com \texttt{fail2ban-client status sshd}, confirmando que a lista de IPs bloqueados ficava vazia.
+
+Foram ainda testadas as op\c{c}\~oes 6 e 7 do menu. A op\c{c}\~ao 6 permitiu reiniciar o servi\c{c}o \texttt{fail2ban}, enquanto a op\c{c}\~ao 7 possibilitou a consulta do ficheiro de \textit{log} ou, em alternativa, dos registos do servi\c{c}o atrav\'es do \texttt{journalctl}.
+
+\begin{lstlisting}[language=bash,caption={Validacoes adicionais do menu do Fail2Ban}]
+/root/projeto/q11_fail2ban.sh
+# opcao 4 - Listar IPs bloqueados
+
+/root/projeto/q11_fail2ban.sh
+# opcao 5 - Desbloquear IP
+fail2ban-client status sshd
+
+/root/projeto/q11_fail2ban.sh
+# opcao 6 - Reiniciar servico
+
+/root/projeto/q11_fail2ban.sh
+# opcao 7 - Ver log
+\end{lstlisting}
+
+Com esta abordagem, a valida\c{c}\~ao funcional permite confirmar que:
+
+\begin{enumerate}
+    \item o script instala corretamente os pacotes necess\'arios;
+    \item a configura\c{c}\~ao do \textit{jail} SSH \'{e} aplicada com sucesso;
+    \item o estado do \texttt{sshd} pode ser consultado a partir do menu;
+    \item tentativas SSH mal sucedidas podem desencadear o bloqueio autom\'atico previsto pelo \texttt{fail2ban};
+    \item os IPs bloqueados podem ser visualizados;
+    \item um IP bloqueado pode ser removido da lista atrav\'es do menu;
+    \item o servi\c{c}o pode ser reiniciado e os registos consultados diretamente a partir da aplica\c{c}\~ao.
+\end{enumerate}
+
+\subsection{Evid\^encias visuais}
+
+As evid\^encias visuais desta quest\~ao demonstram a instala\c{c}\~ao e configura\c{c}\~ao inicial do \texttt{fail2ban}, a verifica\c{c}\~ao do estado do \textit{jail} \texttt{sshd}, os testes realizados a partir da m\'aquina cliente, a listagem e remo\c{c}\~ao de IPs bloqueados, o rein\'{\i}cio do servi\c{c}o e a consulta dos registos.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q11_execuçao_opt_1_2}
+\caption{Execucao das opcoes de instalacao e configuracao inicial do Fail2Ban}
+\label{fig:q11-opt12}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q11_execucao_opt_3}
+\caption{Verificacao do estado do jail \texttt{sshd}}
+\label{fig:q11-opt3}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q11_client_ping_e_tent_login}
+\caption{Teste de conectividade e tentativas de autenticacao SSH a partir da maquina cliente}
+\label{fig:q11-client}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q11_opt_4_5_e_4_denovo}
+\caption{Listagem de IPs bloqueados, desbloqueio do IP e nova verificacao}
+\label{fig:q11-opt45}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q11_opt_6}
+\caption{Reinicio do servico Fail2Ban atraves da opcao 6 do menu}
+\label{fig:q11-opt6}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q11_opt_7_logs}
+\caption{Consulta dos registos do servico atraves da opcao 7 do menu}
+\label{fig:q11-opt7}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q11_logs}
+\caption{Registos adicionais do Fail2Ban obtidos durante a validacao}
+\label{fig:q11-logs}
+\end{figure}
