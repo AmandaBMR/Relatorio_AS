@@ -1,4 +1,4 @@
-\chapter{Automa\c{c}\~ao DNS e Web}
+﻿\chapter{Automa\c{c}\~ao DNS e Web}
 \label{cap3}
 
 \section{Enquadramento do cap\'{\i}tulo}
@@ -319,3 +319,326 @@ A valida\c{c}\~ao da Quest\~ao 3 foi feita em tr\^es n\'{\i}veis para confirmar 
 \caption{Acesso HTTP ao VirtualHost criado automaticamente}
 \label{fig:q3-http}
 \end{figure}
+
+\clearpage
+\section{Quest\~ao 4: cria\c{c}\~ao autom\'atica de registos DNS do tipo A e MX}
+\label{sec:q4}
+
+\subsection{Objetivo}
+
+A Quest\~ao 4 amplia a funcionalidade anteriormente desenvolvida para a cria\c{c}\~ao de zonas DNS, passando a permitir a inser\c{c}\~ao autom\'atica de registos adicionais em zonas j\'a existentes. Em concreto, o objetivo consiste em permitir ao utilizador selecionar um dom\'{\i}nio previamente criado e adicionar, de forma autom\'atica, registos do tipo \texttt{A} e \texttt{MX} no respetivo ficheiro de zona.
+
+Desta forma, o script deixa de estar limitado \`a cria\c{c}\~ao inicial da zona e passa tamb\'em a suportar tarefas de manuten\c{c}\~ao da configura\c{c}\~ao DNS, nomeadamente a adi\c{c}\~ao de novos hosts e a defini\c{c}\~ao de servidores de correio.
+
+\subsection{Implementa\c{c}\~ao do script \texttt{q4\_registos\_dns.sh}}
+
+O script \texttt{q4\_registos\_dns.sh} foi desenvolvido para atuar sobre ficheiros de zona j\'a existentes, localizados na diretoria \texttt{/var/named}. A l\'ogica de funcionamento assenta num menu simples, atrav\'es do qual o utilizador escolhe o tipo de registo a acrescentar.
+
+Numa primeira fase, o script define a diretoria das zonas e implementa uma fun\c{c}\~ao de atualiza\c{c}\~ao do serial.
+
+\begin{lstlisting}[language=bash,caption={Estrutura base e atualizacao do serial}]
+ZONEDIR="/var/named"
+
+atualiza_serial() {
+    local ficheiro="$1"
+    local antigo novo
+
+    antigo=$(grep -m1 'serial' "$ficheiro" | awk '{print $1}')
+    novo=$(date +%Y%m%d01)
+
+    if [ "$antigo" = "$novo" ]; then
+        novo=$(date +%Y%m%d%H)
+    fi
+
+    sed -i "0,/$antigo/s//$novo/" "$ficheiro"
+}
+\end{lstlisting}
+
+Este bloco \'e essencial porque assegura a atualiza\c{c}\~ao do serial sempre que a zona \'{e} alterada, evitando edi\c{c}\~ao manual e reduzindo risco de inconsist\^encias.
+
+Depois disso, o script disponibiliza duas opera\c{c}\~oes principais: adi\c{c}\~ao de registos \texttt{A} e adi\c{c}\~ao de registos \texttt{MX}.
+
+\begin{lstlisting}[language=bash,caption={Adicao de registos do tipo A}]
+adicionar_a() {
+    read -p "Dominio: " DOMINIO
+    ZONEFILE="$ZONEDIR/${DOMINIO}.zone"
+
+    if [ ! -f "$ZONEFILE" ]; then
+        echo "Erro: zona nao encontrada."
+        return
+    fi
+
+    read -p "Host (www, mail, ftp, @): " HOST
+    read -p "IP: " IP
+
+    echo "$HOST    IN    A    $IP" >> "$ZONEFILE"
+    atualiza_serial "$ZONEFILE"
+
+    named-checkzone "$DOMINIO" "$ZONEFILE" || return
+    systemctl restart named
+    echo "Registo A adicionado com sucesso."
+}
+\end{lstlisting}
+
+Nesta opera\c{c}\~ao, o script valida primeiro se a zona existe, acrescenta o registo \texttt{A}, atualiza o serial, valida com \texttt{named-checkzone} e s\'o depois reinicia o servi\c{c}o DNS.
+
+\begin{lstlisting}[language=bash,caption={Adicao de registos do tipo MX}]
+adicionar_mx() {
+    read -p "Dominio: " DOMINIO
+    ZONEFILE="$ZONEDIR/${DOMINIO}.zone"
+
+    if [ ! -f "$ZONEFILE" ]; then
+        echo "Erro: zona nao encontrada."
+        return
+    fi
+
+    read -p "Host do MX (normalmente @): " HOST
+    read -p "Prioridade: " PRIORIDADE
+    read -p "Servidor de mail (ex: mail.$DOMINIO.): " MAILSERVER
+
+    echo "$HOST    IN    MX    $PRIORIDADE    $MAILSERVER" >> "$ZONEFILE"
+    atualiza_serial "$ZONEFILE"
+
+    named-checkzone "$DOMINIO" "$ZONEFILE" || return
+    systemctl restart named
+    echo "Registo MX adicionado com sucesso."
+}
+\end{lstlisting}
+
+Este bloco acrescenta a configura\c{c}\~ao de correio ao dom\'{\i}nio, permitindo definir prioridade e \textit{mail exchanger}. Em cen\'arios normais, o servidor indicado no registo MX deve ter tamb\'em registo \texttt{A} correspondente.
+
+\begin{lstlisting}[language=bash,caption={Menu de operacao}]
+menu() {
+    echo
+    echo "===== MENU DNS ====="
+    echo "1 - Adicionar registo A"
+    echo "2 - Adicionar registo MX"
+    echo "0 - Sair"
+    echo
+    read -p "Opcao: " OP
+
+    case $OP in
+        1) adicionar_a ;;
+        2) adicionar_mx ;;
+        0) exit 0 ;;
+        *) echo "Opcao invalida." ;;
+    esac
+}
+\end{lstlisting}
+
+A estrutura em menu torna a utiliza\c{c}\~ao mais simples e evita edi\c{c}\~ao manual dos ficheiros de zona para opera\c{c}\~oes frequentes de manuten\c{c}\~ao.
+
+\subsection{Valida\c{c}\~ao funcional}
+
+A valida\c{c}\~ao da Quest\~ao 4 foi realizada com execu\c{c}\~ao do script no servidor, inspe\c{c}\~ao do ficheiro de zona e testes de resolu\c{c}\~ao no cliente.
+
+\begin{lstlisting}[language=bash,caption={Execucao do script e verificacao da zona}]
+chmod +x /root/projeto/q4_registos_dns.sh
+/root/projeto/q4_registos_dns.sh
+
+cat /var/named/testando.com.zone
+\end{lstlisting}
+
+Os resultados confirmaram a adi\c{c}\~ao de um registo \texttt{A} para \texttt{mail} e de um registo \texttt{MX} para o dom\'{\i}nio. Foi ainda validada a resolu\c{c}\~ao de \texttt{testando.com} e \texttt{mail.testando.com} no cliente Windows.
+
+Durante o teste do registo MX surgiu um aviso do \texttt{named-checkzone} relacionado com o nome do servidor de mail. Esse comportamento \'{e} compat\'{\i}vel com a introdu\c{c}\~ao do \textit{mail exchanger} sem ponto final (\texttt{.}), fazendo o BIND interpretar o valor como nome relativo da zona. Para evitar essa situa\c{c}\~ao, recomenda-se usar FQDN com ponto final (por exemplo, \texttt{mail.testando.com.}) e garantir que existe registo \texttt{A} correspondente.
+
+\subsection{Evid\^encias visuais da Quest\~ao 4}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q4_execucao_menu}
+\caption{Execucao do script da Questao 4 e adicao de registos A e MX}
+\label{fig:q4-execucao}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q4_zonefile}
+\caption{Ficheiro de zona com registos A e MX adicionados}
+\label{fig:q4-zonefile}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{q4_nslookup_cliente}
+\caption{Validacao de resolucao DNS no cliente}
+\label{fig:q4-nslookup}
+\end{figure}
+
+\clearpage
+\section{Quest\~ao 5: cria\c{c}\~ao autom\'atica de zonas reverse DNS}
+\label{sec:q5}
+
+\subsection{Objetivo}
+
+A Quest\~ao 5 acrescenta ao projeto a automatiza\c{c}\~ao da configura\c{c}\~ao de zonas \textit{reverse} DNS. Enquanto nas quest\~oes anteriores o foco incidia na resolu\c{c}\~ao direta de nomes para endere\c{c}os IP, aqui pretende-se suportar o processo inverso, isto \'{e}, resolver um IP para um nome FQDN atrav\'es de registos \texttt{PTR}.
+
+O objetivo do script \'{e} receber um endere\c{c}o IP e um FQDN introduzidos pelo utilizador, calcular automaticamente a zona \textit{reverse} correspondente e adicionar o registo \texttt{PTR}, criando a zona caso ainda n\~ao exista.
+
+\subsection{Implementa\c{c}\~ao do script \texttt{q5\_reverse\_dns.sh}}
+
+O script foi desenvolvido para automatizar a cria\c{c}\~ao e manuten\c{c}\~ao de zonas \textit{reverse} no BIND, assumindo o esquema cl\'assico de rede \texttt{/24}.
+
+\begin{lstlisting}[language=bash,caption={Estrutura base, validacao do IP e atualizacao do serial}]
+MAINCONF="/etc/named.conf"
+CONFZONES="/etc/named/zones.conf"
+ZONEDIR="/var/named"
+
+valida_ip() {
+    local ip=$1
+    local IFS=.
+    local -a octetos
+    read -r -a octetos <<< "$ip"
+
+    [ ${#octetos[@]} -eq 4 ] || return 1
+
+    for o in "${octetos[@]}"; do
+        [[ "$o" =~ ^[0-9]+$ ]] || return 1
+        [ "$o" -ge 0 ] && [ "$o" -le 255 ] || return 1
+    done
+}
+
+atualiza_serial() {
+    local ficheiro="$1"
+    local antigo novo
+    antigo=$(grep -m1 'serial' "$ficheiro" | awk '{print $1}')
+    novo=$(date +%Y%m%d%H)
+    sed -i "0,/$antigo/s//$novo/" "$ficheiro"
+}
+\end{lstlisting}
+
+Este bloco garante dois pontos centrais: valida\c{c}\~ao de IP de entrada e atualiza\c{c}\~ao autom\'atica do serial sempre que a zona \'{e} alterada.
+
+Depois disso, o script recolhe os dados necess\'arios (\texttt{IP}, \texttt{FQDN}, \texttt{NSSERVER} e \texttt{ROOTMAIL}) e valida o formato do FQDN.
+
+\begin{lstlisting}[language=bash,caption={Validacao do FQDN e calculo da zona reverse}]
+if ! valida_ip "$IP"; then
+    echo "Erro: IP invalido."
+    exit 1
+fi
+
+if [[ ! "$FQDN" =~ \.$ ]]; then
+    echo "Erro: o FQDN deve terminar com ponto final."
+    exit 1
+fi
+
+IFS='.' read -r O1 O2 O3 O4 <<< "$IP"
+
+REVZONE="${O3}.${O2}.${O1}.in-addr.arpa"
+REVFILE="${ZONEDIR}/${O3}.${O2}.${O1}.rev"
+PTRHOST="$O4"
+SERIAL=$(date +%Y%m%d01)
+\end{lstlisting}
+
+Este bloco \'{e} o n\'ucleo l\'ogico da quest\~ao, pois transforma automaticamente o IP numa zona \textit{reverse} no formato \texttt{in-addr.arpa}.
+
+\begin{lstlisting}[language=bash,caption={Criacao automatica da zona reverse}]
+touch "$CONFZONES"
+
+if ! grep -q 'include "/etc/named/zones.conf";' "$MAINCONF"; then
+    echo "" >> "$MAINCONF"
+    echo 'include "/etc/named/zones.conf";' >> "$MAINCONF"
+fi
+
+if ! grep -q "zone \"$REVZONE\"" "$CONFZONES"; then
+    cat >> "$CONFZONES" <<EOF
+
+zone "$REVZONE" IN {
+    type master;
+    file "$(basename "$REVFILE")";
+    allow-update { none; };
+};
+EOF
+
+    cat > "$REVFILE" <<EOF
+\$TTL 86400
+@   IN  SOA $NSSERVER $ROOTMAIL (
+        $SERIAL ; serial
+        3600    ; refresh
+        1800    ; retry
+        604800  ; expire
+        86400 ) ; minimum
+
+@       IN  NS  $NSSERVER
+EOF
+
+    chown root:named "$REVFILE"
+    chmod 640 "$REVFILE"
+fi
+\end{lstlisting}
+
+Aqui o script torna-se totalmente aut\'onomo: caso a zona \textit{reverse} n\~ao exista, cria a declara\c{c}\~ao em \texttt{zones.conf} e gera o ficheiro base com \texttt{SOA} e \texttt{NS}.
+
+\begin{lstlisting}[language=bash,caption={Criacao do registo PTR}]
+if grep -q "^${PTRHOST}[[:space:]]\+IN[[:space:]]\+PTR" "$REVFILE"; then
+    echo "Erro: ja existe PTR para esse IP."
+    exit 1
+fi
+
+echo "${PTRHOST}    IN    PTR    ${FQDN}" >> "$REVFILE"
+atualiza_serial "$REVFILE"
+\end{lstlisting}
+
+Este bloco adiciona o registo \texttt{PTR} e impede duplicados para o mesmo host da zona.
+
+\begin{lstlisting}[language=bash,caption={Validacao final e aplicacao da configuracao}]
+named-checkconf || { echo "Erro no named.conf"; exit 1; }
+named-checkzone "$REVZONE" "$REVFILE" || { echo "Erro na zona reverse"; exit 1; }
+
+systemctl restart named
+echo "PTR criado com sucesso."
+\end{lstlisting}
+
+A valida\c{c}\~ao final garante que apenas configura\c{c}\~oes consistentes s\~ao aplicadas ao servi\c{c}o DNS.
+
+\subsection{Valida\c{c}\~ao funcional}
+
+A valida\c{c}\~ao foi realizada com execu\c{c}\~ao do script no servidor, verifica\c{c}\~ao dos ficheiros gerados e teste de resolu\c{c}\~ao inversa no cliente.
+
+\begin{lstlisting}[language=bash,caption={Execucao do script com dados de teste}]
+chmod +x /root/projeto/q5_reverse_dns.sh
+/root/projeto/q5_reverse_dns.sh
+\end{lstlisting}
+
+Nos testes foram usados os valores:
+\begin{itemize}
+    \item IP: \texttt{10.50.2.214}
+    \item FQDN: \texttt{www.teste.local.}
+    \item servidor DNS principal: \texttt{ns1.teste.local.}
+    \item email administrativo: \texttt{root.teste.local.}
+\end{itemize}
+
+\begin{lstlisting}[language=bash,caption={Verificacao dos ficheiros gerados}]
+cat /etc/named/zones.conf
+cat /var/named/2.50.10.rev
+named-checkzone 2.50.10.in-addr.arpa /var/named/2.50.10.rev
+\end{lstlisting}
+
+As verifica\c{c}\~oes confirmaram que a zona \textit{reverse} foi declarada corretamente, que o ficheiro foi criado no local esperado e que o registo \texttt{PTR} ficou funcional. No cliente Windows, a consulta \texttt{nslookup 10.50.2.214} devolveu o nome \texttt{www.teste.local}.
+
+\subsection{Evid\^encias visuais da Quest\~ao 5}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q5_execucao}
+\caption{Execucao da Questao 5 e criacao do PTR}
+\label{fig:q5-execucao}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\textwidth]{q5_zone_reverse}
+\caption{Zona reverse criada e validada no servidor}
+\label{fig:q5-zone}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{q5_nslookup_reverse}
+\caption{Validacao da resolucao inversa no cliente}
+\label{fig:q5-nslookup}
+\end{figure}
+
+\clearpage
+
